@@ -1,4 +1,5 @@
 const path = require('path')
+const Ioredis = require('ioredis')
 const specHelper = require(path.join(__dirname, '..', 'utils', 'specHelper.js'))
 const NodeResque = require(path.join(__dirname, '..', '..', 'index.js'))
 let queue
@@ -407,6 +408,38 @@ describe('queue', () => {
         expect(Object.keys(hash)[1]).toBe('20000')
         expect(hash['10000'].length).toBe(2)
         expect(hash['20000'].length).toBe(1)
+      })
+
+      describe('prefixed connection', () => {
+        let prefixedRedis
+        let prefixedConnection
+        let prefixedQueue
+
+        beforeEach(async () => {
+          const db = specHelper.connectionDetails.database
+          prefixedRedis = new Ioredis({keyPrefix: 'customNamespace:', db: db})
+          prefixedConnection = new NodeResque.Connection({redis: prefixedRedis, namespace: specHelper.namespace})
+          await prefixedConnection.connect()
+          prefixedQueue = new NodeResque.Queue({connection: prefixedConnection, queue: specHelper.queue})
+          await prefixedQueue.connect()
+
+          await prefixedQueue.enqueueAt(10000, specHelper.queue, 'job1', [1, 2, 3])
+          await prefixedQueue.enqueueAt(10000, specHelper.queue, 'job2', [1, 2, 3])
+          await prefixedQueue.enqueueAt(20000, specHelper.queue, 'job3', [1, 2, 3])
+        })
+
+        afterAll(async () => {
+          prefixedQueue.end()
+          prefixedConnection.end()
+          prefixedRedis.quit()
+        })
+
+        test('queue.timestamps work with prefixed connections', async () => {
+          let timestamps = await prefixedQueue.timestamps()
+          expect(timestamps.length).toBe(2)
+          expect(timestamps[0]).toBe(10000)
+          expect(timestamps[1]).toBe(20000)
+        })
       })
     })
 
